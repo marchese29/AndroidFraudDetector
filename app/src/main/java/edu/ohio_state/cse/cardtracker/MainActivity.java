@@ -1,12 +1,14 @@
 package edu.ohio_state.cse.cardtracker;
 
+import android.app.NotificationManager;
+import android.content.Context;
 import android.os.Bundle;
+import android.support.v4.app.NotificationCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.Toast;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -109,7 +111,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     this.onDataFromServer(line);
                 }
             } catch (InterruptedException e) {
-                // We received an interrupt while sleeping.
+                // We received an interrupt while sleeping, no error.
             } catch (IOException e) {
                 e.printStackTrace();
             } finally {
@@ -125,13 +127,19 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         /**
          * Creates and shows a new fraud notification.
          *
-         * IMPORTANT: This is not run on the UI Thread.
-         *
          * @param trx The fraudulent transaction.
          * @param reason The reason that the transaction is fraudulent.
          */
         protected void createFraudNotification(Transaction trx, String reason) {
             Log.i(MainActivity.TAG, "A fraud notification was requested.");
+
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(MainActivity.this)
+                    .setSmallIcon(R.mipmap.ic_launcher)
+                    .setContentTitle("Potential Fraud Detected: " + trx.getVendor())
+                    .setContentText(reason);
+            NotificationManager notificationManager =
+                    (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            notificationManager.notify(0, builder.build());
         }
 
         /**
@@ -143,23 +151,17 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         protected void onDataFromServer(final String data) {
             // For now, show the eventual text.
             Log.d(MainActivity.TAG, "Received data: " + data);
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    Toast.makeText(MainActivity.this, data, Toast.LENGTH_SHORT).show();
-                }
-            });
 
             // Create the transaction.
             Transaction trx = new Transaction(data);
 
             // TODO: Check previous transactions and check for fraud.
-            createFraudNotification(trx, "Reason");
+            createFraudNotification(trx, data);
             for (Transaction t : this.transactions) {
                 // See if we have any issues with this particular transaction and our new one.
             }
 
-            // There is no fraud, add the transaction to the running list.
+            // Add the transaction to the running list.
             this.transactions.add(trx);
         }
     }
