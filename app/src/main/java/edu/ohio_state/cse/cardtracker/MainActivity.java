@@ -2,6 +2,9 @@ package edu.ohio_state.cse.cardtracker;
 
 import android.app.NotificationManager;
 import android.content.Context;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import android.os.Bundle;
 import android.support.v4.app.NotificationCompat;
 import android.support.v7.app.AppCompatActivity;
@@ -9,6 +12,8 @@ import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -20,6 +25,7 @@ import java.util.List;
 public class MainActivity extends AppCompatActivity implements View.OnClickListener {
 
     private static final String TAG = "MainActivity";
+    private static final int TWO_MINUTES = 1000 * 60 * 2;
 
     private Button connectButton;
     private Button disconnectButton;
@@ -27,6 +33,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private EditText portBox;
 
     private Thread clientThread;
+
+    private LocationManager locationManager;
+    private LocationListener locationListener;
+    private Location currentLocation;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -46,6 +56,103 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
         // Our disconnect button should not be enabled unless we're connected.
         disconnectButton.setEnabled(false);
+
+        // Configure location updates.
+        this.configureLocation();
+    }
+
+    /**
+     * Determines whether or not the provided location is better than the current best.
+     *
+     * @param location The most-recently acquired location from the current provider.
+     * @param currentBestLocation The best current known location.
+     * @return Whether or not the location is better now.
+     */
+    private static boolean isBetterLocation(Location location, Location currentBestLocation) {
+        if (currentBestLocation == null) {
+            // A new location is always better than no location
+            return true;
+        }
+
+        // Check whether the new location fix is newer or older
+        long timeDelta = location.getTime() - currentBestLocation.getTime();
+        boolean isSignificantlyNewer = timeDelta > TWO_MINUTES;
+        boolean isSignificantlyOlder = timeDelta < -TWO_MINUTES;
+        boolean isNewer = timeDelta > 0;
+
+        // If it's been more than two minutes since the current location, use the new location
+        // because the user has likely moved
+        if (isSignificantlyNewer) {
+            return true;
+            // If the new location is more than two minutes older, it must be worse
+        } else if (isSignificantlyOlder) {
+            return false;
+        }
+
+        // Check whether the new location fix is more or less accurate
+        int accuracyDelta = (int) (location.getAccuracy() - currentBestLocation.getAccuracy());
+        boolean isLessAccurate = accuracyDelta > 0;
+        boolean isMoreAccurate = accuracyDelta < 0;
+        boolean isSignificantlyLessAccurate = accuracyDelta > 200;
+
+        // Check if the old and new location are from the same provider
+        boolean isFromSameProvider = isSameProvider(location.getProvider(),
+                currentBestLocation.getProvider());
+
+        // Determine location quality using a combination of timeliness and accuracy
+        if (isMoreAccurate) {
+            return true;
+        } else if (isNewer && !isLessAccurate) {
+            return true;
+        } else if (isNewer && !isSignificantlyLessAccurate && isFromSameProvider) {
+            return true;
+        }
+        return false;
+    }
+
+    /** Checks whether two providers are the same */
+    private static boolean isSameProvider(String provider1, String provider2) {
+        if (provider1 == null) {
+            return provider2 == null;
+        }
+        return provider1.equals(provider2);
+    }
+
+    /**
+     * Configures location updates.
+     */
+    private void configureLocation() {
+        this.locationManager =
+                (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        this.locationListener = new LocationListener() {
+            @Override
+            public void onLocationChanged(Location location) {
+                if (isBetterLocation(location, MainActivity.this.currentLocation)) {
+                    MainActivity.this.currentLocation = location;
+                }
+            }
+
+            @Override
+            public void onStatusChanged(String provider, int status, Bundle extras) {
+
+            }
+
+            @Override
+            public void onProviderEnabled(String provider) {
+
+            }
+
+            @Override
+            public void onProviderDisabled(String provider) {
+
+            }
+        };
+        try {
+            locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 0, 0, this.locationListener);
+            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0, 0, this.locationListener);
+        } catch (SecurityException e) {
+            e.printStackTrace();
+        }
     }
 
     @Override
@@ -65,6 +172,16 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 this.connectButton.setEnabled(true);
                 this.clientThread = null;
                 break;
+        }
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        try {
+            this.locationManager.removeUpdates(this.locationListener);
+        } catch (SecurityException e) {
+            e.printStackTrace();
         }
     }
 
@@ -130,7 +247,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
          * @param trx The fraudulent transaction.
          * @param reason The reason that the transaction is fraudulent.
          */
-        protected void createFraudNotification(Transaction trx, String reason) {
+        protected void createFraudNotification(Transaction trx, final String reason) {
             Log.i(MainActivity.TAG, "A fraud notification was requested.");
 
             NotificationCompat.Builder builder = new NotificationCompat.Builder(MainActivity.this)
@@ -140,6 +257,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             NotificationManager notificationManager =
                     (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             notificationManager.notify(0, builder.build());
+
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    Toast.makeText(MainActivity.this, reason, Toast.LENGTH_LONG).show();
+                }
+            });
         }
 
         /**
@@ -156,9 +280,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             Transaction trx = new Transaction(data);
 
             // TODO: Check previous transactions and check for fraud.
-            createFraudNotification(trx, data);
             for (Transaction t : this.transactions) {
                 // See if we have any issues with this particular transaction and our new one.
+//                createFraudNotification(trx, data);
             }
 
             // Add the transaction to the running list.
