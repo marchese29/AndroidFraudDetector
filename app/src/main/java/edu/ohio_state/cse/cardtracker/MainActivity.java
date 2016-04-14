@@ -127,9 +127,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         this.locationListener = new LocationListener() {
             @Override
             public void onLocationChanged(Location location) {
+                Log.d(MainActivity.TAG,"Detected Location change");
                 if (isBetterLocation(location, MainActivity.this.currentLocation)) {
+                    Log.d(MainActivity.TAG,"About to set currentLocation");
                     MainActivity.this.currentLocation = location;
+                    Log.d(MainActivity.TAG,"Set currentLocation");
                 }
+
             }
 
             @Override
@@ -151,6 +155,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 0, 0, this.locationListener);
             locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0, 0, this.locationListener);
         } catch (SecurityException e) {
+            Log.d(MainActivity.TAG,"Security Exception");
             e.printStackTrace();
         }
     }
@@ -248,7 +253,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
          * @param reason The reason that the transaction is fraudulent.
          */
         protected void createFraudNotification(Transaction trx, final String reason) {
-            Log.i(MainActivity.TAG, "A fraud notification was requested.");
+            Log.d(MainActivity.TAG, "A fraud notification was requested.");
 
             NotificationCompat.Builder builder = new NotificationCompat.Builder(MainActivity.this)
                     .setSmallIcon(R.mipmap.ic_launcher)
@@ -266,6 +271,26 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             });
         }
 
+        boolean requiredQuickTravel(int firstTime, int secondTime, float distance){
+            int firstDate = firstTime/10000;
+            int secondDate = secondTime/10000;
+            boolean isSuspicious = false;
+            //if the transactions happened on the same day
+            if(firstDate==secondDate){
+                int timeDifference = Math.abs(firstTime-secondTime);
+                //within the last hour
+                if((timeDifference)<100){
+                    //more than 200 miles away
+                    isSuspicious = distance > 321869;
+                    //within last 5 hours
+                }else if(timeDifference<500){
+                    //more than 1000 miles away
+                    isSuspicious = distance >  1609000;
+                }
+            }
+            return isSuspicious;
+        }
+
         /**
          * Called when the server sends us new data.  Use this opportunity to check the validity
          * of a transaction and send a fraud notification if necessary.
@@ -275,17 +300,38 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         protected void onDataFromServer(final String data) {
             // For now, show the eventual text.
             Log.d(MainActivity.TAG, "Received data: " + data);
-
             // Create the transaction.
             Transaction trx = new Transaction(data);
 
-            // TODO: Check previous transactions and check for fraud.
-            for (Transaction t : this.transactions) {
-                // See if we have any issues with this particular transaction and our new one.
-//                createFraudNotification(trx, data);
+
+
+            if(currentLocation!=null) {
+                if (trx.getAmount() > 500) {
+                    createFraudNotification(trx, "Transaction amount greater than $500.");
+                } else if (!trx.usedChip() && trx.getAmount() > 25) {
+                    createFraudNotification(trx, "Transaction without chip greater than $25.");
+                }else if (trx.getLocation().distanceTo(currentLocation) > 500) {
+                    createFraudNotification(trx, "Transaction further than 500 meters away.");
+                }else if (trx.getVendor().toLowerCase().contains("vend") && trx.getAmount() > 10) {
+                    createFraudNotification(trx, "Vending machine made transaction greater than $10.");
+                } else {
+
+                        boolean firstTime = true;
+                        Transaction mostRecent;
+
+                        // TODO: Check previous transactions and check for fraud.
+                        for (Transaction t : this.transactions) {
+                             if (requiredQuickTravel(t.getTimeStamp(), trx.getTimeStamp(), trx.getLocation().distanceTo(t.getLocation()))) {
+                                createFraudNotification(trx, "Two transactions occurred far apart over a short amount of time.");
+                             }
+                        }
+                }
+
+            }else{
+                createFraudNotification(trx, "phone location is null");
             }
 
-            // Add the transaction to the running list.
+            // Add the transaction to the running list
             this.transactions.add(trx);
         }
     }
